@@ -1,0 +1,1189 @@
+//бд
+CREATE TABLE role (
+  id_role INT(11) NOT NULL AUTO_INCREMENT,
+  name VARCHAR(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  PRIMARY KEY (id_role)
+);
+
+INSERT INTO role (id_role, name) VALUES
+(1, 'user'),
+(2, 'admin');
+
+CREATE TABLE status (
+  id_status INT(11) NOT NULL AUTO_INCREMENT,
+  code VARCHAR(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  name VARCHAR(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  PRIMARY KEY (id_status)
+);
+
+INSERT INTO status (id_status, code, name) VALUES
+(1, 'new', 'Новый'),
+(2, 'confirmed', 'Подтвержден'),
+(3, 'canceled', 'Отменен');
+
+CREATE TABLE user_table (
+  id_user INT(11) NOT NULL AUTO_INCREMENT,
+  login VARCHAR(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  password VARCHAR(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  name VARCHAR(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  surname VARCHAR(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  patronymic VARCHAR(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  phone VARCHAR(17) COLLATE utf8mb4_unicode_ci NOT NULL,
+  email VARCHAR(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  id_role INT(11),
+  PRIMARY KEY (id_user),
+  KEY (id_role),
+  FOREIGN KEY (id_role) REFERENCES role(id_role)
+);
+
+INSERT INTO user_table (id_user, login, password, name, surname, patronymic, phone, email, id_role) VALUES
+(1, 'user1', 'password1', 'Иван', 'Петров', 'Сергеевич', '+7(999)-111-22-33', 'user1@mail.ru', 1),
+(2, 'sklad', '123qwe', 'Склад', 'Администратор', 'Системный', '+7(888)-222-33-44', 'admin@avocska.ru', 2);
+
+CREATE TABLE product (
+  id_product INT(11) NOT NULL AUTO_INCREMENT,
+  name VARCHAR(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  price DECIMAL(10,2) NOT NULL,
+  description TEXT COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  PRIMARY KEY (id_product)
+);
+
+INSERT INTO product (id_product, name, price, description) VALUES
+(1, 'Яблоки', 150.50, 'Свежие красные яблоки'),
+(2, 'Банан', 80.00, 'Спелые бананы'),
+(3, 'Молоко', 90.00, 'Молоко 3.2% жирности'),
+(4, 'Хлеб', 50.00, 'Пшеничный хлеб'),
+(5, 'Яйца', 120.00, 'Куриные яйца');
+
+CREATE TABLE order_table (
+  id_order INT(11) NOT NULL AUTO_INCREMENT,
+  id_user INT(11),
+  id_product INT(11),
+  id_status INT(11),
+  quantity INT(11) NOT NULL,
+  delivery_address VARCHAR(200) COLLATE utf8mb4_unicode_ci NOT NULL,
+  order_date TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id_order),
+  KEY (id_user),
+  KEY (id_product),
+  KEY (id_status),
+  FOREIGN KEY (id_user) REFERENCES user_table(id_user),
+  FOREIGN KEY (id_product) REFERENCES product(id_product),
+  FOREIGN KEY (id_status) REFERENCES status(id_status)
+);
+
+INSERT INTO order_table (id_order, id_user, id_product, id_status, quantity, delivery_address, order_date) VALUES
+(1, 1, 1, 1, 5, 'ул. Ленина, 10, кв. 25', '2025-01-23 07:00:01'),
+(2, 1, 3, 2, 2, 'ул. Ленина, 10, кв. 25', '2025-01-23 07:00:01');
+
+
+//если что-то потребуется добавить
+ALTER TABLE `order_table`
+ADD COLUMN `delivery_time` TIME DEFAULT NULL;
+или удалить:
+ALTER TABLE `order_table`
+DROP COLUMN `delivery_time`;
+
+
+
+main.py:
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import pymysql
+from datetime import timedelta
+
+app = Flask(__name__)
+CORS(app, supports_credentials=True)
+
+# Подключение к базе данных
+def db():
+    return pymysql.connect(
+        host="localhost",
+        user="root",
+        password="",
+        database="lavka",
+        port=3308,
+        cursorclass=pymysql.cursors.DictCursor
+    )
+
+# Регистрация пользователя
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.json
+    conn = db()
+    cur = conn.cursor()
+
+    cur.execute("SELECT 1 FROM user_table WHERE login=%s", (data["login"],))
+    if cur.fetchone():
+        return jsonify({"msg": "Логин занят"}), 400
+
+    cur.execute(""" 
+        INSERT INTO user_table (login, password, name, surname, patronymic, phone, email, id_role)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, 1)
+    """, (data["login"], data["password"], data["name"], data["surname"],
+          data["patronymic"], data["phone"], data["email"]))
+    conn.commit()
+    return jsonify({"msg": "ok"})
+
+# Авторизация пользователя
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.json
+    conn = db()
+    cur = conn.cursor()
+
+    cur.execute("SELECT id_user, password, id_role FROM user_table WHERE login=%s", (data["login"],))
+    user = cur.fetchone()
+
+    if not user or user["password"] != data["password"]:
+        return jsonify({"msg": "Ошибка входа"}), 401
+
+    return jsonify({"user_id": user["id_user"], "role": user["id_role"]})
+
+# Получение всех продуктов
+@app.route('/product', methods=['GET'])
+def get_services():
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("SELECT id_product, name, price, description FROM product")
+    return jsonify(cur.fetchall())
+
+
+# Получение всех статусов
+@app.route('/statuses', methods=['GET'])
+def get_statuses():
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("SELECT id_status, name FROM status ORDER BY id_status ASC")
+    return jsonify(cur.fetchall())
+
+# Добавление новой заявки
+@app.route('/add_application', methods=['POST'])
+def add_application():
+    data = request.json
+    conn = db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO order_table (
+            id_user, id_product, id_status, quantity, delivery_address, order_date
+        ) VALUES (%s, %s, 1, %s, %s, %s)
+    """, (data["id_user"], data["id_product"], data["quantity"], data["delivery_address"],
+          data["order_date"]))
+    conn.commit()
+    return jsonify({"msg": "Заявка добавлена"})
+
+# Получение заявок конкретного пользователя
+@app.route('/user_applications/<int:user_id>', methods=['GET'])
+def get_user_applications(user_id):
+    conn = db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT 
+            ot.id_order, ot.quantity, ot.delivery_address, ot.order_date,
+            p.id_product, p.name, p.price, p.description,
+            st.name AS status_name, st.id_status
+                
+        FROM order_table ot
+        JOIN product p ON ot.id_product = p.id_product
+        JOIN status st ON ot.id_status = st.id_status
+                
+        WHERE ot.id_user = %s
+        ORDER BY ot.id_order DESC
+    """, (user_id,))
+    applications = cur.fetchall()
+
+    return jsonify(applications)
+
+# Получение всех заявок (для админа)
+@app.route('/all_applications', methods=['GET'])
+def get_all_applications():
+    conn = db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT 
+            ot.id_order, ot.quantity, ot.delivery_address, ot.order_date,
+            p.id_product, p.name AS product_name, p.price, p.description,
+            st.id_status, st.name AS status_name,
+            u.id_user, u.email, u.name, u.surname, u.patronymic
+                
+        FROM order_table ot
+        JOIN product p ON ot.id_product = p.id_product
+        JOIN status st ON ot.id_status = st.id_status
+        JOIN user_table u ON ot.id_user = u.id_user
+                
+       
+        ORDER BY ot.id_order DESC
+    """)
+    applications = cur.fetchall()
+    print("Полученные заявки:", applications)
+    return jsonify(applications)
+
+# ✅ Обновление нескольких статусов заявок
+@app.route('/update_statuses', methods=['POST'])
+def update_statuses():
+    data = request.json  # Ожидаем массив словарей: [{id_application, id_status}, ...]
+    conn = db()
+    cur = conn.cursor()
+
+    for app in data:
+        cur.execute(
+            "UPDATE order_table SET id_status=%s WHERE id_order=%s",
+            (app["id_status"], app["id_order"])
+        )
+
+    conn.commit()
+    return jsonify({"msg": "Все статусы обновлены"})
+
+if __name__ == "__main__":
+    app.run(debug=True, port=8000)
+
+
+
+@app.route('/quest', methods=['GET'])
+def get_quest():
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, name, description, quest_type_id, difficulty_id, price, max_participants FROM quest")
+    quests = cur.fetchall()
+    print("Полученные квесты:", quests)
+    return jsonify(quests)
+
+
+
+App.js:
+import React from 'react';
+import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
+import Home from './components/Home';
+import Register from './components/Register';
+import Login from './components/Login';
+import Requests from './components/Requests';
+import AdminPanel from './components/AdminPanel';
+
+import Header from './components/Header';
+import Footer from './components/Footer';
+
+import 'bootstrap/dist/css/bootstrap.min.css';
+
+const App = () => {
+  return (
+    <Router>
+      {/* Основная обёртка для высоты на весь экран */}
+      <div className="d-flex flex-column min-vh-100">
+        {/* Шапка */}
+        <Header />
+
+        {/* Основной контент */}
+        <main className="flex-grow-1">
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/requests" element={<Requests />} />
+            <Route path="/admin" element={<AdminPanel />} />
+          </Routes>
+        </main>
+
+        {/* Подвал */}
+        <Footer />
+      </div>
+    </Router>
+  );
+};
+
+export default App;
+
+
+Login:
+import React, { useState } from 'react';
+import { Form, Button, Container } from 'react-bootstrap';
+import { useNavigate } from 'react-router-dom';
+import '../styles/FormStyles.css';
+
+const Login = () => {
+  const [loginData, setLoginData] = useState({
+    login: '',
+    password: '',
+  });
+
+  const navigate = useNavigate();
+
+  const handleChange = (e) => {
+    setLoginData({
+      ...loginData,
+      [e.target.name]: e.target.value,
+    });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    try {
+      const response = await fetch('http://localhost:8000/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(loginData),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+
+        // сохраняем user_id и role в localStorage
+        localStorage.setItem('token', JSON.stringify(data));
+
+        // если админ, перенаправляем в админ-панель
+        if (data.role === 2) {
+          navigate('/admin');
+        } else {
+          navigate('/requests');
+        }
+
+      } else {
+        alert('Неверный логин или пароль');
+      }
+    } catch (error) {
+      console.error('Ошибка при входе:', error);
+      alert('Ошибка подключения к серверу');
+    }
+  };
+
+  // Функция для возврата на главную
+  const goToHome = () => {
+    navigate('/');
+  };
+
+  return (
+    <Container className="mt-5">
+      <div className="form-container" style={{ maxWidth: '600px', margin: '0 auto' }}>
+        <h2>Авторизация</h2>
+        <Form onSubmit={handleSubmit}>
+          <Form.Group controlId="formLogin">
+            <Form.Label>Логин</Form.Label>
+            <Form.Control
+              type="text"
+              name="login"
+              value={loginData.login}
+              onChange={handleChange}
+              required
+              placeholder="Введите логин"
+              className="w-100"  // Сделать поле ввода шириной 100% на мобильных устройствах
+            />
+          </Form.Group>
+
+          <Form.Group controlId="formPassword" className="mt-3">
+            <Form.Label>Пароль</Form.Label>
+            <Form.Control
+              type="password"
+              name="password"
+              value={loginData.password}
+              onChange={handleChange}
+              required
+              placeholder="Введите пароль"
+              className="w-100"
+            />
+          </Form.Group>
+
+          <Button variant="primary" type="submit" className="mt-3 w-100">
+            Войти
+          </Button>
+        </Form>
+
+        {/* Кнопка для возвращения на главную страницу */}
+        <Button variant="secondary" onClick={goToHome} className="mt-3 w-100 w-sm-auto">
+          Вернуться на главную
+        </Button>
+      </div>
+    </Container>
+  );
+};
+
+export default Login;
+
+Regiser:
+import React, { useState } from 'react';
+import { Form, Button, Container } from 'react-bootstrap';
+import { useNavigate } from 'react-router-dom';
+import '../styles/FormStyles.css';  // Подключаем кастомные стили
+
+const Register = () => {
+  const [form, setForm] = useState({
+    username: '',
+    password: '',
+    firstname: '',  // Имя
+    lastname: '',   // Фамилия
+    patronymic: '', // Отчество
+    phone: '',
+    email: '',
+  });
+   const navigate = useNavigate();
+ 
+  const handleChange = (e) => {
+    setForm({
+      ...form,
+      [e.target.name]: e.target.value,
+    });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    // Отправка данных на сервер
+    try {
+      const response = await fetch('http://localhost:8000/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: form.firstname,  // Имя
+          surname: form.lastname,  // Фамилия
+          patronymic: form.patronymic,  // Отчество
+          login: form.username,
+          phone: form.phone,
+          email: form.email,
+          password: form.password,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Регистрация успешна:', data);
+        alert('Регистрация прошла успешно!');  // Успешное оповещение
+        // Здесь можно, например, перенаправить пользователя на другую страницу или очистить форму
+        setForm({
+          username: '',
+          password: '',
+          firstname: '',
+          lastname: '',
+          patronymic: '',
+          phone: '',
+          email: '',
+        });
+      } else {
+        const errorData = await response.json();
+        console.error('Ошибка регистрации:', errorData);
+        alert('Ошибка регистрации: ' + errorData.msg);  // Оповещение об ошибке
+      }
+    } catch (error) {
+      console.error('Ошибка при отправке данных:', error);
+      alert('Произошла ошибка при отправке данных. Попробуйте снова.');
+    }
+  };
+
+  // Функция для возврата на главную
+  const goToHome = () => {
+    navigate('/');
+  };
+
+  return (
+    <Container className="mt-5">
+      <div className="form-container" style={{ maxWidth: '600px', margin: '0 auto' }}>
+        <h2>Регистрация</h2>
+        <Form onSubmit={handleSubmit}>
+          <Form.Group controlId="formUsername">
+            <Form.Label>Логин</Form.Label>
+            <Form.Control
+              type="text"
+              name="username"
+              value={form.username}
+              onChange={handleChange}
+              required
+              placeholder="Введите логин"
+              className="w-100"  // Сделать поле ввода шириной 100% на мобильных устройствах
+            />
+          </Form.Group>
+          <Form.Group controlId="formPassword">
+            <Form.Label>Пароль</Form.Label>
+            <Form.Control
+              type="password"
+              name="password"
+              value={form.password}
+              onChange={handleChange}
+              required
+              placeholder="Введите пароль"
+              className="w-100"
+            />
+          </Form.Group>
+          <Form.Group controlId="formFirstname">
+            <Form.Label>Имя</Form.Label>
+            <Form.Control
+              type="text"
+              name="firstname"
+              value={form.firstname}
+              onChange={handleChange}
+              required
+              placeholder="Введите имя"
+              className="w-100"
+            />
+          </Form.Group>
+          <Form.Group controlId="formLastname">
+            <Form.Label>Фамилия</Form.Label>
+            <Form.Control
+              type="text"
+              name="lastname"
+              value={form.lastname}
+              onChange={handleChange}
+              required
+              placeholder="Введите фамилию"
+              className="w-100"
+            />
+          </Form.Group>
+          <Form.Group controlId="formPatronymic">
+            <Form.Label>Отчество</Form.Label>
+            <Form.Control
+              type="text"
+              name="patronymic"
+              value={form.patronymic}
+              onChange={handleChange}
+              required
+              placeholder="Введите отчество"
+              className="w-100"
+            />
+          </Form.Group>
+          <Form.Group controlId="formPhone">
+            <Form.Label>Телефон</Form.Label>
+            <Form.Control
+              type="text"
+              name="phone"
+              value={form.phone}
+              onChange={handleChange}
+              required
+              placeholder="Введите телефон"
+              className="w-100"
+            />
+          </Form.Group>
+          <Form.Group controlId="formEmail">
+            <Form.Label>Электронная почта</Form.Label>
+            <Form.Control
+              type="email"
+              name="email"
+              value={form.email}
+              onChange={handleChange}
+              required
+              placeholder="Введите электронную почту"
+              className="w-100"
+            />
+          </Form.Group>
+          <Button variant="primary" type="submit" className="mt-3 w-100">
+            Зарегистрироваться
+          </Button>
+        </Form>
+
+        {/* Кнопка для возвращения на главную страницу */}
+        <Button variant="secondary" onClick={goToHome} className="mt-3 w-100">
+          Вернуться на главную
+        </Button>
+      </div>
+    </Container>
+  );
+};
+
+export default Register;
+
+
+
+index.js:
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import './index.css';
+import App from './App';
+import reportWebVitals from './reportWebVitals';
+import 'bootstrap/dist/css/bootstrap.min.css';
+
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+reportWebVitals();
+
+компоненты:
+AddApplicationForm:
+import React, { useState, useEffect } from 'react';
+import { Button, Form, Container } from 'react-bootstrap';
+
+const AddApplicationForm = () => {
+  const [formData, setFormData] = useState({
+    id_product: '',
+    quantity: '',
+    delivery_address: '',
+    order_date: '',
+  });
+
+  const [product, setProduct] = useState([]);
+
+  useEffect(() => {
+    fetchAll();
+  }, []);
+
+  const fetchAll = async () => {
+    try {
+      const [productRes] = await Promise.all([
+        fetch('http://localhost:8000/product'),
+      ]);
+
+      const productData = await productRes.json();
+      setProduct(productData);
+    } catch (error) {
+      console.error('Ошибка при загрузке товаров:', error);
+    }
+  };
+
+  const handleChange = (e) => {
+    setFormData({
+      ...formData,
+      [e.target.name]: e.target.value,
+    });
+  };
+
+  const handleAddApplication = async (e) => {
+    e.preventDefault();
+    const token = localStorage.getItem('token');
+    if (!token) {
+      alert('Вы не авторизованы!');
+      return;
+    }
+
+    const userData = JSON.parse(token);
+    const userId = userData.user_id;
+
+    const newApplication = {
+      ...formData,
+      id_user: userId,
+    };
+
+    try {
+      const response = await fetch('http://localhost:8000/add_application', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(newApplication),
+      });
+
+      if (response.ok) {
+        alert('Заявка добавлена');
+        setFormData({
+          id_product: '',
+          quantity: '',
+          delivery_address: '',
+          order_date: '',
+        });
+      } else {
+        alert('Ошибка при добавлении заявки');
+      }
+    } catch (error) {
+      console.error('Ошибка при добавлении заявки:', error);
+    }
+  };
+
+  return (
+    <Container className="mt-5">
+      <div className="form-container" style={{ maxWidth: '600px', margin: '0 auto' }}>
+        <h2>Добавить заявку</h2>
+        <Form onSubmit={handleAddApplication}>
+          <Form.Group controlId="formProduct">
+            <Form.Label>Товар</Form.Label>
+            <Form.Control
+              as="select"
+              name="id_product"
+              value={formData.id_product}
+              onChange={handleChange}
+              required
+              className="w-100"
+            >
+              <option value="">Выберите товар</option>
+              {product.map((product) => (
+                <option key={product.id_product} value={product.id_product}>
+                  {product.name} - {product.price} - {product.description}
+                </option>
+              ))}
+            </Form.Control>
+          </Form.Group>
+
+          <Form.Group controlId="formQuantity">
+            <Form.Label>Количество товара</Form.Label>
+            <Form.Control
+              type="number"
+              name="quantity"
+              value={formData.quantity}
+              onChange={handleChange}
+              min="1"
+              required
+              className="w-100"
+            />
+          </Form.Group>
+
+          <Form.Group controlId="formAddress">
+            <Form.Label>Адрес</Form.Label>
+            <Form.Control
+              type="text"
+              name="delivery_address"
+              value={formData.delivery_address}
+              onChange={handleChange}
+              required
+              className="w-100"
+            />
+          </Form.Group>
+
+          <Form.Group controlId="formDate">
+            <Form.Label>Дата</Form.Label>
+            <Form.Control
+              type="date"
+              name="order_date"
+              value={formData.order_date}
+              onChange={handleChange}
+              required
+              className="w-100"
+            />
+          </Form.Group>
+
+          <Button variant="success" type="submit" className="mt-3 w-100">
+            Добавить заявку
+          </Button>
+        </Form>
+      </div>
+    </Container>
+  );
+};
+
+export default AddApplicationForm;
+
+
+AdminPanel:
+import React, { useEffect, useState } from "react";
+import { Button, Table, Container, Row, Col, Form, Alert } from 'react-bootstrap';
+
+const AdminPanel = () => {
+  const [applications, setApplications] = useState([]);
+  const [statuses, setStatuses] = useState([]);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    fetch('http://localhost:8000/all_applications')
+      .then(res => res.json())
+      .then(data => {
+        console.log("Полученные заявки:", data); // Отладка данных
+        setApplications(data);
+      })
+      .catch(err => {
+        console.error('Error fetching applications:', err);
+        setError('Ошибка при получении заявок');
+      });
+
+    fetch('http://localhost:8000/statuses')
+      .then(res => res.json())
+      .then(data => {
+        console.log("Полученные статусы:", data); // Отладка статусов
+        setStatuses(data);
+      })
+      .catch(err => {
+        console.error('Error fetching statuses:', err);
+        setError('Ошибка при получении статусов');
+      });
+  }, []);
+
+  const handleStatusChange = (applicationId, newStatusId) => {
+    console.log(`Изменение статуса заявки с id_order: ${applicationId} на новый статус: ${newStatusId}`);
+    setApplications(applications.map(admin =>
+      admin.id_order === applicationId
+        ? {
+            ...admin,
+            id_status: newStatusId,
+            status_name: statuses.find(s => s.id_status === newStatusId)?.name || admin.status_name
+          }
+        : admin
+    ));
+  };
+
+  const handleSaveChanges = () => {
+    const updates = applications
+      .filter(admin => typeof admin.id_status !== "undefined")
+      .map(admin => ({
+        id_order: admin.id_order,
+        id_status: admin.id_status
+      }));
+
+    console.log("Обновления, которые отправляются на сервер:", updates); // Отладка данных
+
+    if (updates.length === 0) {
+      alert("Нет изменений для сохранения");
+      return;
+    }
+
+    fetch('http://localhost:8000/update_statuses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    })
+      .then(res => res.json())
+      .then(() => alert('Статусы успешно обновлены'))
+      .catch(err => {
+        console.error('Ошибка при обновлении статусов:', err);
+        alert('Ошибка при обновлении статусов');
+      });
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    window.location.href = '/login';
+  };
+
+  return (
+    <Container className="mt-4 mb-5">
+      <Row className="align-items-center mb-4">
+        <Col><h2>Админ-Панель</h2></Col>
+        <Col className="text-end">
+          <Button variant="danger" onClick={handleLogout}>
+            Выйти
+          </Button>
+        </Col>
+      </Row>
+
+      {error && <Alert variant="danger">{error}</Alert>}
+
+      <h4 className="mb-3">Список заявок</h4>
+
+      <Table striped bordered hover responsive>
+        <thead className="table-dark">
+          <tr>
+            <th>ФИО</th>
+            <th>Email</th>
+            <th>Товар</th>
+            <th>Количество</th>
+            <th>Текущий статус</th>
+            <th>Изменить статус</th>
+          </tr>
+        </thead>
+        <tbody>
+          {applications.map(admin => (
+            <tr key={admin.id_order}>
+              <td>{admin.name} {admin.surname} {admin.patronymic}</td>
+              <td>{admin.email}</td>
+              <td>{admin.product_name}</td>
+              <td>{admin.quantity}</td>
+              <td>{admin.status_name}</td>
+              
+              <td>
+                <Form.Select
+                  value={admin.id_status || ''}
+                  onChange={(e) =>
+                    handleStatusChange(admin.id_order, Number(e.target.value))
+                  }
+                >
+                  <option value="">Выберите статус</option>
+                  {statuses.map(status => (
+                    <option key={status.id_status} value={status.id_status}>
+                      {status.name}
+                    </option>
+                  ))}
+                </Form.Select>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+
+      <div className="text-center mt-4">
+        <Button variant="success" onClick={handleSaveChanges}>
+          Сохранить изменения
+        </Button>
+      </div>
+    </Container>
+  );
+};
+
+export default AdminPanel;
+
+Footer:
+import React from 'react';
+import { Container } from 'react-bootstrap';
+
+const Footer = () => {
+  return (
+    <footer className="bg-dark text-light py-3 mt-auto">
+      <Container className="text-center">
+        <small>© {new Date().getFullYear()} Мой сайт. Все права защищены.</small>
+      </Container>
+    </footer>
+  );
+};
+
+export default Footer;
+
+Header:
+import React from 'react';
+import { Navbar, Nav, Container } from 'react-bootstrap';
+import { Link, useNavigate } from 'react-router-dom';
+
+const Header = () => {
+  const navigate = useNavigate();
+
+  // Проверяем, есть ли токен (или флаг) в localStorage
+  const isLoggedIn = localStorage.getItem('token'); // можно заменить на любое другое имя
+
+  const handleLogout = () => {
+    localStorage.removeItem('token'); // удаляем токен при выходе
+    navigate('/login');
+  };
+
+  return (
+    <Navbar bg="dark" variant="dark" expand="lg">
+      <Container>
+        <Navbar.Brand as={Link} to="/">Мой сайт</Navbar.Brand>
+        <Navbar.Toggle aria-controls="basic-navbar-nav" />
+        <Navbar.Collapse id="basic-navbar-nav">
+          <Nav className="ms-auto">
+
+            {/* Если не авторизован — показываем кнопки Вход и Регистрация */}
+            {!isLoggedIn ? (
+              <>
+                <Nav.Link as={Link} to="/">Главная</Nav.Link>
+                <Nav.Link as={Link} to="/login">Вход</Nav.Link>
+                <Nav.Link as={Link} to="/register">Регистрация</Nav.Link>
+              </>
+            ) : (
+              <>
+                <Nav.Link as={Link} to="/requests">Мои заявки</Nav.Link>
+                <Nav.Link onClick={handleLogout}>Выход</Nav.Link>
+              </>
+            )}
+          </Nav>
+        </Navbar.Collapse>
+      </Container>
+    </Navbar>
+  );
+};
+
+export default Header;
+
+Home:
+import React from 'react';
+import { Button, Container, Carousel } from 'react-bootstrap';
+import { Link } from 'react-router-dom';
+
+// Импортируем картинки
+import image1 from '../assets/images/image1.jpg';
+import image2 from '../assets/images/image2.jpg';
+import image3 from '../assets/images/image3.jpg';
+
+const Home = () => {
+  return (
+    <Container className="text-center mt-5">
+      <h1>Добро пожаловать</h1>
+
+      {/* Кнопки для входа и регистрации */}
+      <Link to="/login">
+        <Button variant="primary" className="m-2">Вход</Button>
+      </Link>
+      <Link to="/register">
+        <Button variant="secondary" className="m-2">Регистрация</Button>
+      </Link>
+
+      {/* Слайдер */}
+      <Carousel className="my-4" style={{ maxWidth: '800px', margin: '0 auto' }}> {/* Ограничиваем ширину слайдера */}
+        <Carousel.Item>
+          <img
+            className="d-block w-100"
+            src={image1}  // Используем импортированное изображение
+            alt="Первое изображение"
+            style={{ height: '700px', objectFit: 'cover' }}  // Устанавливаем высоту и корректируем изображение
+          />
+          <Carousel.Caption>
+            <h3>Первое изображение</h3>
+            <p>Описание первого изображения.</p>
+          </Carousel.Caption>
+        </Carousel.Item>
+        <Carousel.Item>
+          <img
+            className="d-block w-100"
+            src={image2}  // Используем импортированное изображение
+            alt="Второе изображение"
+            style={{ height: '700px', objectFit: 'cover' }}  // Устанавливаем высоту и корректируем изображение
+          />
+          <Carousel.Caption>
+            <h3>Второе изображение</h3>
+            <p>Описание второго изображения.</p>
+          </Carousel.Caption>
+        </Carousel.Item>
+        <Carousel.Item>
+          <img
+            className="d-block w-100"
+            src={image3}  // Используем импортированное изображение
+            alt="Третье изображение"
+            style={{ height: '700px', objectFit: 'cover' }}  // Устанавливаем высоту и корректируем изображение
+          />
+          <Carousel.Caption>
+            <h3>Третье изображение</h3>
+            <p>Описание третьего изображения.</p>
+          </Carousel.Caption>
+        </Carousel.Item>
+      </Carousel>
+    </Container>
+  );
+};
+
+export default Home;
+
+Requests:
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Button, Card, ListGroup } from 'react-bootstrap';
+import AddApplicationForm from './AddApplicationForm'; // Импортируем компонент формы
+
+const Requests = () => {
+  const navigate = useNavigate();
+  const [applications, setApplications] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      navigate('/login');  // Если токена нет, перенаправляем на страницу входа
+    } else {
+      const userData = JSON.parse(token);
+      fetchApplications(userData.user_id);  // Загружаем заявки для текущего пользователя
+    }
+  }, [navigate]);
+
+  const fetchApplications = async (userId) => {
+    setLoading(true);
+    try {
+      const response = await fetch(`http://localhost:8000/user_applications/${userId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setApplications(data);
+      } else {
+        setApplications([]);
+      }
+    } catch (error) {
+      console.error('Ошибка при загрузке заявок:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');  // Удаляем токен
+    navigate('/login');  // Перенаправляем на страницу входа
+  };
+
+  return (
+    <div className="container mt-4">
+      <div className="d-flex justify-content-between align-items-center mb-3">
+        <h2>Ваши заявки</h2>
+        {/* <Button variant="danger" onClick={handleLogout} className="ml-auto">
+          Выйти
+        </Button> */}
+      </div>
+
+      <div className="mb-4">
+        {loading ? (
+          <p>Загружаем заявки...</p>
+        ) : applications.length === 0 ? (
+          <p>Заявки не найдены. Добавьте заявку!</p>
+        ) : (
+          <ListGroup>
+            {applications.map((order_table, index) => (
+              <ListGroup.Item key={order_table.id_order} className="mb-3 border-0"> {/* Убираем дополнительную обводку */}
+                <Card className="shadow-sm"> {/* Используем Card только для обводки */}
+                  <Card.Body>
+                    <Card.Title>Заявка #{index + 1}</Card.Title>
+                    <Card.Text>
+                      <strong>Продукт:</strong> {order_table.name} - {order_table.price} {order_table.description}
+                    </Card.Text>
+                    <Card.Text>
+                      <strong>Количество:</strong> {order_table.quantity}
+                    </Card.Text>
+                    <Card.Text>
+                      <strong>Адрес:</strong> {order_table.delivery_address}
+                    </Card.Text>
+                    <Card.Text>
+                      <strong>Дата доставки:</strong> {new Date(order_table.order_date).toLocaleDateString()}
+                    </Card.Text>
+                    <Card.Text>
+                      <strong>Статус:</strong> {order_table.status_name}
+                    </Card.Text>
+                  </Card.Body>
+                </Card>
+              </ListGroup.Item>
+            ))}
+          </ListGroup>
+        )}
+      </div>
+
+      <div className="mb-4">
+        
+        <AddApplicationForm />
+      </div>
+    </div>
+  );
+};
+
+export default Requests;
+
+FormStyles:
+
+
+  /* Стили для кнопок */
+  button {
+    width: 20%;
+    padding: 10px;
+    font-size: 16px;
+    border-radius: 5px;
+    margin-top: 20px ;
+  }
+  
+  .form-control{
+    width: 50% !important;
+  }
+  
+  /* .form-label{
+    margin-left: 330px;
+  } */
+  /* Используем Flexbox для выравнивания */
+.requests-container {
+    display: flex;
+    justify-content: space-between;  /* Это разместит элементы по краям */
+    align-items: center;  /* Центрирует по вертикали */
+    padding: 20px;
+  }
+  
+  .button-exit {
+    margin-left: auto;  /* Перемещает кнопку в правый угол */
+    max-width: 80px !important;
+  }
+
+  .add-application-container{
+    margin-left: 30px;
+  }
+  
+  .add-application ul {
+    list-style-type: none;
+    padding-left: 0;
+    margin-left: 30px;
+  }
+
+  /* Адаптивные стили для кнопок на мобильных устройствах */
+@media (max-width: 576px) {
+  .m-2 {
+    width: 100% !important;  /* Устанавливаем ширину кнопок на всю ширину контейнера */
+    font-size: 16px; /* Можно изменить размер шрифта для мобильных устройств, если нужно */
+  }
+}
+
+
+
+
+
+
+
+
+
