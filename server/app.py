@@ -122,57 +122,14 @@ def create_app():
                 if not all(arg in args and args[arg] for arg in required):
                     return jsonify({"response": "Missing required flight search parameters."})
 
-                raw_date = args["departure_date"]
-                session = getattr(request, "session", {})
-
-                # Use previously stored raw date if user said "next year" or "this year"
-                parsed_date, status = parse_and_validate_date(raw_date, previous_date_str=session.get("last_date_prompt"))
-
-                if status == "unrecognized":
-                    return jsonify({"response": f"I couldn't understand the date '{raw_date}'. Please provide a valid travel date."})
-
-                if status == "past":
-                    if not hasattr(request, "session"):
-                        request.session = {}
-                    request.session["last_date_prompt"] = raw_date
-                    return jsonify({
-                        "response": f"The date '{raw_date}' seems to be in the past. Did you mean this year or next year?"
-                    })
-
-               
-                # ✅ Confirm date before continuing
-                readable_date = parsed_date.strftime("%A, %B %d, %Y")
-                confirm_msg = f"Got it! You want to search for flights on **{readable_date}**. Let me check..."
-                args["departure_date"] = parsed_date.strftime("%Y-%m-%d")
-
-                # Optionally store this as the last prompt for disambiguation like "next year"
-                if not hasattr(request, "session"):
-                    request.session = {}
-                request.session["last_date_prompt"] = raw_date
-
-                # 🔁 Confirm the interpreted date before continuing
-                # Add the confirmation message
-                confirm_msg = f"Got it! You want to search for flights on **{readable_date}**. Let me check..."
-
-
-                                
-
-                origin_name = args["origin"]
-                destination_name = args["destination"]
-
-                origin_code = get_iata_code(origin_name)
-                destination_code = get_iata_code(destination_name)
-
-                if not origin_code or not destination_code:
-                    return jsonify({
-                        "response": f"Could not find IATA codes for '{origin_name}' or '{destination_name}'."
-                    })
-
-                args["origin"] = origin_code
-                args["destination"] = destination_code
-                
                 result = search_flights(**args)
-                tool_output = result
+
+                if "error" in result:
+                    return jsonify({"response": result["error"]})
+
+                confirm_msg = result.get("confirm_msg", "")
+                tool_output = {"flights": result.get("flights", [])}
+
 
             elif func_name == "search_hotels":
                 result = search_hotels(**args)
