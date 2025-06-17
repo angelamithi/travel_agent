@@ -73,6 +73,29 @@ def create_app():
             return jsonify({
                 "response": "Hi! How can I assist you with your travel plans today?"
             })
+        
+        # ✳️ Guardrail: Check if input is travel-related
+        classification_prompt = f"""
+        Classify the following message. Is the user asking about travel (flights, hotels, destinations, tours, budget, cities, dates)? 
+        Answer only 'yes' or 'no'.
+
+        Message: \"{user_input}\"
+        """
+
+        classification_response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a classifier that answers with only 'yes' or 'no'."},
+                {"role": "user", "content": classification_prompt}
+            ]
+        )
+
+        is_travel_related = classification_response.choices[0].message.content.strip().lower()
+
+        if is_travel_related != "yes":
+            return jsonify({
+                "response": "I'm a travel planner here to help with your travel plans. Could you please rephrase your question in that context?"
+            })
 
         # Build conversation history
         messages = [{"role": "system", "content": "You are a helpful travel assistant."}]
