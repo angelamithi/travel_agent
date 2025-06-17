@@ -13,31 +13,49 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def is_greeting(message):
-    message = message.lower().strip()
-    return message in ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening']
+    greetings = ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening', 'hi there', 'howdy', 'greetings']
+    return any(greet in message.lower() for greet in greetings)
 
-def parse_and_validate_date(raw_date):
+
+def parse_and_validate_date(raw_date, previous_date_str=None):
     today = datetime.now()
-    parsed = parse_date(raw_date, settings={"PREFER_DAY_OF_MONTH": "first"})
+    current_year = today.year
+    next_year = current_year + 1
+    lower_date = raw_date.lower().strip()
+
+    # Handle "this year" or "next year" explicitly
+    if lower_date == "this year":
+        return datetime(today.year, 1, 1), "ok"
+    elif lower_date == "next year":
+        return datetime(today.year + 1, 1, 1), "ok"
+
+    # Parse the natural language date
+    parsed = parse_date(
+        raw_date,
+        settings={
+            "PREFER_DAY_OF_MONTH": "first",
+            "PREFER_DATES_FROM": "future",
+            "RELATIVE_BASE": today
+        }
+    )
 
     if not parsed:
         return None, "unrecognized"
 
-    # If the year wasn't specified, or it's being misinferred
-    inferred_year = parsed.year if parsed.year != 1900 else None
-    month_day = parsed.strftime("%m-%d")
+    # Check if it's a partial date (e.g. "24th May") that could refer to a past month
+    if parsed.month < today.month or (parsed.month == today.month and parsed.day < today.day):
+        # The user probably meant next year
+        parsed = parsed.replace(year=next_year)
+    else:
+        # If still ambiguous (e.g., "25 July" and today is before that), stick to this year
+        parsed = parsed.replace(year=current_year)
 
-    # Try assuming current year if date is ambiguous or past
-    assumed_date = datetime.strptime(f"{today.year}-{month_day}", "%Y-%m-%d")
-
-    if assumed_date.date() < today.date():
-        # If user said "this year" explicitly, try forcing it
-        if "this year" in raw_date.lower():
-            return assumed_date, "past"
-        # Otherwise prompt for clarification
+    if parsed.date() < today.date():
         return None, "past"
 
-    return assumed_date, "ok"
+    return parsed, "ok"
+
+
 
 
 def create_app():
@@ -82,23 +100,40 @@ def create_app():
                     return jsonify({"response": "Missing required flight search parameters."})
 
                 raw_date = args["departure_date"]
-                parsed_date, status = parse_and_validate_date(raw_date)
+                session = getattr(request, "session", {})
+
+                # Use previously stored raw date if user said "next year" or "this year"
+                parsed_date, status = parse_and_validate_date(raw_date, previous_date_str=session.get("last_date_prompt"))
 
                 if status == "unrecognized":
                     return jsonify({"response": f"I couldn't understand the date '{raw_date}'. Please provide a valid travel date."})
 
-                # inside search_flights handling block
                 if status == "past":
-                    # Store the last attempted date
-                    request.session = {
-                        "last_date_prompt": raw_date
-                    }
+                    if not hasattr(request, "session"):
+                        request.session = {}
+                    request.session["last_date_prompt"] = raw_date
                     return jsonify({
                         "response": f"The date '{raw_date}' seems to be in the past. Did you mean this year or next year?"
                     })
 
-
+               
+                # ✅ Confirm date before continuing
+                readable_date = parsed_date.strftime("%A, %B %d, %Y")
+                confirm_msg = f"Got it! You want to search for flights on **{readable_date}**. Let me check..."
                 args["departure_date"] = parsed_date.strftime("%Y-%m-%d")
+
+                # Optionally store this as the last prompt for disambiguation like "next year"
+                if not hasattr(request, "session"):
+                    request.session = {}
+                request.session["last_date_prompt"] = raw_date
+
+                # 🔁 Confirm the interpreted date before continuing
+                # Add the confirmation message
+                confirm_msg = f"Got it! You want to search for flights on **{readable_date}**. Let me check..."
+
+
+                                
+
                 origin_name = args["origin"]
                 destination_name = args["destination"]
 
@@ -112,6 +147,7 @@ def create_app():
 
                 args["origin"] = origin_code
                 args["destination"] = destination_code
+                
                 result = search_flights(**args)
                 tool_output = result
 
@@ -158,11 +194,12 @@ def create_app():
                 ]
             )
 
-            final = followup.choices[0].message.content
+            final = f"{confirm_msg}\n\n{followup.choices[0].message.content}"
             return jsonify({
                 "response": final,
                 "city": result.get("city") if func_name == "recommend_tours" else None
             })
+
 
         # No tools triggered, return raw content
         return jsonify({"response": message.content})
