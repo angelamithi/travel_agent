@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import './TravelChatBot.css';
 
 function TravelChatBot() {
@@ -8,6 +8,12 @@ function TravelChatBot() {
   const [chatHistory, setChatHistory] = useState([]);
   const [lastKnownCity, setLastKnownCity] = useState(null);
   const [isTyping, setIsTyping] = useState(false);
+  const messagesEndRef = useRef(null);
+
+  // Scroll to bottom on new message
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   useEffect(() => {
     navigator.geolocation.getCurrentPosition(
@@ -29,31 +35,43 @@ function TravelChatBot() {
 
     const userMsg = { role: "user", content: input };
     const updatedHistory = [...chatHistory, userMsg];
+
+    // Add user message to UI
     setMessages((prev) => [...prev, { sender: "user", text: input }]);
     setInput("");
     setIsTyping(true);
 
-    const res = await fetch("/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: input,
-        history: updatedHistory,
-        location: userLocation,
-        lastKnownCity: lastKnownCity,
-      }),
-    });
+    try {
+      const res = await fetch("http://127.0.0.1:5000/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: input,
+          history: updatedHistory, // ✅ always send full history
+          location: userLocation,
+          lastKnownCity: lastKnownCity,
+        }),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    if (data.city) {
-      setLastKnownCity(data.city);
+      if (data.city) {
+        setLastKnownCity(data.city);
+      }
+
+      const botMsg = { role: "assistant", content: data.response };
+
+      // Update chat history and UI with bot response
+      setChatHistory((prev) => [...prev, userMsg, botMsg]); // ✅ store both sides of conversation
+      setMessages((prev) => [...prev, { sender: "bot", text: data.response }]);
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        { sender: "bot", text: "There was an error. Please try again." },
+      ]);
+    } finally {
+      setIsTyping(false);
     }
-
-    const botMsg = { role: "assistant", content: data.response };
-    setChatHistory([...updatedHistory, botMsg]);
-    setMessages((prev) => [...prev, { sender: "bot", text: data.response }]);
-    setIsTyping(false);
   };
 
   const handleKeyDown = (e) => {
@@ -95,7 +113,9 @@ function TravelChatBot() {
               </div>
             </div>
           )}
+          <div ref={messagesEndRef} />
         </div>
+
         <div className="chatbot-input-area">
           <input
             value={input}

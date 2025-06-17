@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 import requests
 from amadeus import Client, ResponseError
 
+
 # Load environment variables first!
 load_dotenv()
 
@@ -11,26 +12,34 @@ amadeus = Client(
     client_secret=os.getenv("AMADEUS_API_SECRET")
 )
 
-def search_flights(origin, destination, departure_date):
-    response = amadeus.shopping.flight_offers_search.get(
-        originLocationCode=origin,
-        destinationLocationCode=destination,
-        departureDate=departure_date,
-        adults=1
-    )
-    data = response.data
 
-    return {
-        "flights": [
-            {
-                "airline": offer['validatingAirlineCodes'][0],
-                "price": offer['price']['total'],
-                "departure": offer['itineraries'][0]['segments'][0]['departure'],
-                "arrival": offer['itineraries'][0]['segments'][-1]['arrival']
-            }
-            for offer in data[:3]
-        ]
-    }
+
+def search_flights(origin, destination, departure_date):
+    try:
+        response = amadeus.shopping.flight_offers_search.get(
+            originLocationCode=origin,
+            destinationLocationCode=destination,
+            departureDate=departure_date,
+            adults=1
+        )
+        data = response.data
+
+        return {
+            "flights": [
+                {
+                    "airline": offer['validatingAirlineCodes'][0],
+                    "price": offer['price']['total'],
+                    "departure": offer['itineraries'][0]['segments'][0]['departure'],
+                    "arrival": offer['itineraries'][0]['segments'][-1]['arrival']
+                }
+                for offer in data[:3]
+            ]
+        }
+
+    except ResponseError as e:
+        print("Amadeus API error:", e.response.status_code, e.response.body)
+        return {"error": "Failed to fetch flights. Please check your input parameters."}
+
 
 def search_hotels(city_code, checkin_date, checkout_date):
     response = amadeus.shopping.hotel_offers.get(
@@ -149,3 +158,21 @@ def reverse_geocode(lat, lon):
         return None
     except Exception as e:
         return None
+    
+def get_iata_code(city_name):
+    # If already 3 uppercase letters, assume it's a valid IATA code
+    if isinstance(city_name, str) and len(city_name) == 3 and city_name.isalpha() and city_name.isupper():
+        return city_name
+
+    try:
+        response = amadeus.reference_data.locations.get(
+            keyword=city_name,
+            subType="CITY"
+        )
+        if response.data:
+            return response.data[0]["iataCode"]
+        return None
+    except Exception as e:
+        print("IATA lookup failed:", e)
+        return None
+
