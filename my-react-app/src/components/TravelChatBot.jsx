@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import './TravelChatBot.css';
+import ReactMarkdown from 'react-markdown';
+
 
 function TravelChatBot() {
   const [messages, setMessages] = useState([]);
@@ -95,13 +97,22 @@ function TravelChatBot() {
       <main className="chatbot-container">
         <h2 className="chatbot-title">🌍 Travel Assistant</h2>
         <div className="chatbot-messages">
-          {messages.map((msg, idx) => (
-            <div key={idx} className={`chat-message ${msg.sender}`}>
-              {msg.sender === "bot" && <div className="avatar">🤖</div>}
-              <div className="bubble">{msg.text}</div>
-              {msg.sender === "user" && <div className="avatar">🧑</div>}
-            </div>
-          ))}
+        {messages.map((msg, idx) => (
+  <div key={idx} className={`chat-message ${msg.sender}`}>
+    {msg.sender === "bot" && <div className="avatar">🤖</div>}
+    <div className="bubble">
+      {msg.sender === "bot" ? (
+         <div className="markdown-content">
+        <ReactMarkdown>{msg.text}</ReactMarkdown>
+        </div>
+      ) : (
+        msg.text
+      )}
+    </div>
+    {msg.sender === "user" && <div className="avatar">🧑</div>}
+  </div>
+))}
+
           {isTyping && (
             <div className="typing-indicator">
               <div className="avatar">🤖</div>

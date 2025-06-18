@@ -225,4 +225,3 @@ def get_iata_code(city_name):
     except Exception as e:
         print("IATA lookup failed:", e)
         return None
-

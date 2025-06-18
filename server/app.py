@@ -175,6 +175,8 @@ def create_app():
             )
 
             final = f"{confirm_msg}\n\n{followup.choices[0].message.content}"
+
+
             return jsonify({
                 "response": final,
                 "city": result.get("city") if func_name == "recommend_tours" else None
